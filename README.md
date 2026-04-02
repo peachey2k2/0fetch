@@ -27,14 +27,19 @@ Basically raf ([@NotAShelf](https://github.com/NotAShelf)) made his own fetcher 
 
 Also I like code golfing.
 
-## But the benchmarks??
+## How do I install it???
+1. clone the repo
+2. run `make build` (you'll need [fasm](https://flatassembler.net/))
+3. add it to your $PATH if you wanna
+
+## But the benchmarks?????
 <img width="80%" alt="image" src="https://github.com/user-attachments/assets/aa1665af-3ebd-49ea-af4e-e2f187a727a9" />
 
 #mogged #packwatch #ripbozo #RolledAndSmoked etc.
 
 Want more stupid fancy tables? Go stare at [microfetch's benchmarks](https://github.com/NotAShelf/microfetch?tab=readme-ov-file#benchmarks).
 
-## But portability???
+## But portability?????????????
 <img width="80%" alt="image" src="https://github.com/user-attachments/assets/e3377a5b-72de-4193-bf93-3b2ca0907b99" />
 
 
