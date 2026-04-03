@@ -6,7 +6,7 @@ inc = macros.inc
 
 out = 0fetch
 
-.PHONY: all build run
+.PHONY: all build clean run
 
 all:
 	$(error )
@@ -22,4 +22,4 @@ run: build
 	./$(out)
 
 clean:
-	rm $(out)
+	rm ./$(out)
