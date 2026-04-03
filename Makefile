@@ -6,7 +6,7 @@ inc = macros.inc
 
 out = 0fetch
 
-.PHONY: all build release run
+.PHONY: all build run
 
 all:
 	$(error )
