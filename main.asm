@@ -18,9 +18,7 @@ main:
 
   ; first, we need to get to envp
   pop         rcx ; argc
-  inc         rcx ; +1 for nullptr at the end
-  shl         rcx, 3
-  add         rsp, rcx ; skip over argv
+  lea         rsp, [rsp + rcx*8 + 8] ; skip argv
 
   mov         ebx, 4
 
@@ -34,7 +32,10 @@ main:
   pop         rsi
   test        ebx, ebx
   jz          .end_envvar_scan
-  test        rsi, rsi
+
+  ; SIZE: stack starts at 0x0000_8000_0000_0000 and goes down, and we aren't realisticly
+  ; gonna have 4GB of environment vars so using esi over rsi should be safe. 1 byte saved lol
+  test        esi, esi 
   jz          .end_envvar_scan
 
   ; SAFETY: precheck lengths to avoid a potential segfault
@@ -82,7 +83,6 @@ main:
   add         rsi, 17
   mov         [d.session_type], rsi
   dec         ebx
-  jmp         .loop_envvar_scan
 
 ; SIZE: this exists for the sake of short jumps
 .loop_envvar_scan_hoop:
@@ -246,6 +246,9 @@ main:
   mov         eax, 0x80000004
   mov         esi, 48
 
+  ; NOTE: for safety's sake, in theory we should call cpuid with eax = 0x80000000 first
+  ; to verify that the cpu supports extended functions up to 0x80000004, but any cpu
+  ; made in the last 20 years should support that already
 .cpuid_loop:
   sub         esi, 16
   push        rax
@@ -264,7 +267,7 @@ main:
   mov         eax, SYS_uname
   lea         rdi, [d.utsname]
   syscall
-  test        rax, rax
+  test        eax, eax
   jnz         .ERR_uname_failed
 @@:
 
@@ -272,7 +275,7 @@ main:
   mov         eax, SYS_sysinfo
   lea         rdi, [d.sysinfo]
   syscall
-  test        rax, rax
+  test        eax, eax
   jnz         .ERR_sysinfo_failed
 @@:
 
@@ -281,7 +284,7 @@ main:
   mov         rdi, root_path
   lea         rsi, [d.statvfs]
   syscall
-  test        rax, rax
+  test        eax, eax
   jnz         .ERR_statfs_failed
 @@:
 
@@ -367,7 +370,7 @@ main:
   div         rbx
   push        rdx
   
-  test        rax, rax
+  test        eax, eax
   jz          .skip_days
   push        rax
 
@@ -393,7 +396,7 @@ main:
   div         rbx
   push        rdx
 
-  test        rax, rax
+  test        eax, eax
   jz          .skip_hours
   push        rax
 
@@ -418,7 +421,7 @@ main:
   mov         ebx, 60
   div         rbx
 
-  test        rax, rax
+  test        eax, eax
   jz          .skip_minutes
   push        rax
 
@@ -661,10 +664,10 @@ main:
   inc         r15
 
   pop         rax
-  and         rax, 0xFFFF
-  mov         rbx, 100
-  mul         rbx
-  shr         rax, 16
+  and         eax, 0xFFFF
+  mov         ebx, 100
+  mul         ebx
+  shr         eax, 16
   call        dw_to_str
   move_str_n  r15, r13, rbx
   add         r15, rbx
@@ -680,7 +683,7 @@ main:
   ;; aaaand redeem
   lea         rbx, [d.main_buffer]
   sub         r15, rbx
-  mov         eax, 1 ; SYS_write ; TODO: uses parts of elf header for 1
+  mov         eax, 1 ; SYS_write ; TODO: uses parts of elf header for 1??
   mov         edi, 1 ; stdout
   lea         rsi, [d.main_buffer]
   mov         rdx, r15
