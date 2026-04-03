@@ -11,7 +11,7 @@ out = 0fetch
 all:
 	$(error )
 
-build: $(out $(out))
+build: $(out)
 
 $(out): $(src) $(inc) Makefile
 	$(info --- build ---)
