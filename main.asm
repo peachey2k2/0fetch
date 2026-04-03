@@ -243,57 +243,22 @@ main:
 @@:
   mov         [d.mem_available], rax
 
-  mov         eax, SYS_open
-  mov         edi, cpuinfo_dir ; SAFETY: truncating is fine since it's guaranteed to be within bounds
-  xor         esi, esi ; O_RDONLY
-  syscall
-  test        eax, eax
-  jl          .ERR_failed_to_read_cpuinfo
+  mov         eax, 0x80000004
+  mov         esi, 48
 
-  push        rax ; fd
-  mov         rdi, rax
-  xor         eax, eax ; SYS_read
-  lea         rsi, [d.main_buffer]
-  mov         edx, BUFFER_SIZE
-  syscall
-  test        eax, eax
-  jl          .ERR_failed_to_read_cpuinfo
-
-  pop         rdi
-  push        rax ; byte count
-  mov         eax, SYS_close
-  syscall
-
-  lea         rsi, [d.main_buffer]
-  pop         rcx
-  jmp         @f
-
-.cpuinfo_next:
-  dec         ecx
-  inc         rsi
-
-@@:
-  cmp         rcx, 13
-  jl          .ERR_couldnt_find_cpu_name
-
-  cmp         dword [rsi], "mode"
-  jne         .cpuinfo_next
-  cmp         dword [rsi+4], "l na"
-  jne         .cpuinfo_next
-  cmp         word [rsi+8], "me"
-  jne         .cpuinfo_next
-
-  add         rsi, 10
-
-@@:
-  inc         rsi
-  cmp         byte [rsi], ":"
-  jne         @b
-
-  add         rsi, 2
-  lea         r11, [d.cpu_name]
-  move_str_10 r11, rsi
-  mov         [d.cpu_name_len], rcx
+.cpuid_loop:
+  sub         esi, 16
+  push        rax
+  cpuid
+  lea         rdi, [d.cpu_name + rsi]
+  mov         dword [rdi], eax
+  mov         dword [rdi+4], ebx
+  mov         dword [rdi+8], ecx
+  mov         dword [rdi+12], edx
+  pop         rax
+  dec         eax
+  test        esi, esi
+  jnz         .cpuid_loop
 
   ; int uname(struct utsname *buf);
   mov         eax, SYS_uname
@@ -677,9 +642,9 @@ main:
   move_str_n  r15, logo_line_9, logo_line_9_size
   add         r15, logo_line_9_size
 
-  lea         rax, [d.cpu_name]
-  move_str_n  r15, rax, [d.cpu_name_len]
-  add         r15, [d.cpu_name_len]
+  lea         rdi, [d.cpu_name]
+  call        move_str_0
+  add         r15, rcx
 
   mov         dword [r15], 0x5B1B2820 ; " (\e["
   mov         dword [r15+4], "36m"
@@ -741,12 +706,6 @@ main:
 .ERR_couldnt_find_mem_available:
   mov         dil,  104
   jmp         .end
-.ERR_failed_to_read_cpuinfo:
-  mov         dil,  105
-  jmp         .end
-.ERR_couldnt_find_cpu_name:  
-  mov         dil,  106
-  jmp         .end
 .ERR_uname_failed:
   mov         dil,  107
   jmp         .end
@@ -805,8 +764,6 @@ struc DataStruct {
   .system        rb 64
   .system_len    rq 1
   .cpu_name      rb 64
-  .cpu_name_len  rq 1
-  mov         [d.cpu_name_len], rcx
   .mem_available rq 1
 
   .main_buffer  rb 2048
@@ -825,7 +782,6 @@ BUFFER_SIZE = 2048
 
 os_release_dir db "/etc/os-release", 0
 meminfo_dir    db "/proc/meminfo", 0
-cpuinfo_dir    db "/proc/cpuinfo", 0
 root_path      db "/", 0
 
 placeholder db "<N/A>"
