@@ -1,15 +1,25 @@
-include "header.inc" ; ELF header
-include "macros.inc" ; macros and some common procedures
+include "header.inc"    ; ELF header
+include "procs.inc"     ; macros and procedures
+include "syscalls.inc"  ; syscall constants
+
+
+version:
+  mov rsi, .prog_version
+  mov rdx, prog_version_size
+  jmp print_and_end
+
+.prog_version db "0fetch v", VERSION, " ", LATEST_COMMIT, 10
+
+prog_version_size = $ - .prog_version
+
 
 ;;;;;;;;;; code ;;;;;;;;;;
 main:
-
   ; we'll return after setting up the allocations
   mov         rbp, rsp
 
   ; r14 will always point to uname struct
-  sub         rsp, PROG_DATA_SIZE
-  mov         r14, rsp
+  lea         r14, [rsp - PROG_DATA_SIZE]
   
   xchg        rsp, rbp
 
@@ -18,84 +28,127 @@ main:
 
   ; first, we need to get to envp
   pop         rcx ; argc
+
+  cmp         rcx, 1 ; idc, any arg will bring up the version
+  ja short    version
+  
   lea         rsp, [rsp + rcx*8 + 8] ; skip argv
 
-  mov         ebx, 4
+  mov         ebx, 5
 
   lea         eax, [placeholder]
   mov         [d.desktop], rax
   mov         [d.session_type], rax
   mov         [d.shell], rax
   mov         [d.username], rax
+  mov         [d.terminal], rax
 
 .loop_envvar_scan:
   pop         rsi
   test        ebx, ebx
-  jz          .end_envvar_scan
+  jz short    .end_envvar_scan_hoop
 
   ; SIZE: stack starts at 0x0000_8000_0000_0000 and goes down, and we aren't realisticly
   ; gonna have 4GB of environment vars so using esi over rsi should be safe. 1 byte saved lol
-  test        esi, esi 
-  jz          .end_envvar_scan
+  test        esi, esi
+.end_envvar_scan_hoop:
+  jz near     .end_envvar_scan
 
   ; SAFETY: precheck lengths to avoid a potential segfault
-  strlen      rsi
-  cmp         ecx, 20
-  jge         .check_desktop
-  cmp         ecx, 17
-  jge         .check_session_type
-  cmp         ecx, 6
-  jge         .check_shell
-  cmp         ecx, 5
-  jge         .check_user
-  jmp         .loop_envvar_scan
+  mov         rdi, rsi
+  not         ecx ; SIZE: this is fine since rcx should be argc
+  xor         al, al
+  repne scasb
+
+  ; SIZE: we used to have a `not` and an `inc` on ecx but we can just prebake that on compared values instead
+  cmp         ecx, not 20 + 1
+  jbe short   .check_desktop
+  cmp         ecx, not 17 + 1
+  jbe short   .check_session_type
+  cmp         ecx, not 13 + 1
+  jbe near    .check_terminal
+  cmp         ecx, not 6 + 1
+  jbe near    .check_shell
+  cmp         ecx, not 5 + 1
+  jbe near    .check_user
+  jmp short   .loop_envvar_scan_hoop_1
 
 .check_desktop:
   cmp         dword [rsi], "XDG_"
-  jne         .check_session_type
-  cmp         dword [rsi+4], "CURR"
-  jne         .check_session_type_2
-  cmp         dword [rsi+8], "ENT_"
-  jne         .loop_envvar_scan
-  cmp         dword [rsi+12], "DESK"
-  jne         .loop_envvar_scan
-  cmp         dword [rsi+16], "TOP="
-  jne         .loop_envvar_scan
+  jne short   .check_session_type
+
+  mov         rax, "CURRENT_"
+  cmp         qword [rsi+4], rax
+  jne short   .check_session_type_2
+  mov         rax, "DESKTOP="
+  cmp         qword [rsi+12], rax
+  jne short   .loop_envvar_scan
 
   add         rsi, 20
   mov         [d.desktop], rsi
   dec         ebx
-  jmp         .loop_envvar_scan
+.loop_envvar_scan_hoop_1:
+  jmp short   .loop_envvar_scan
 
 .check_session_type:
   cmp         dword [rsi], "XDG_"
-  jne         .check_shell
+  jne short   .check_terminal
 .check_session_type_2:
-  cmp         dword [rsi+4], "SESS"
-  jne         .loop_envvar_scan_hoop
-  cmp         dword [rsi+8], "ION_"
-  jne         .loop_envvar_scan_hoop
+  mov         rax, "SESSION_"
+  cmp         qword [rsi+4], rax
+  jne short   .loop_envvar_scan_hoop_1
   cmp         dword [rsi+12], "TYPE"
-  jne         .loop_envvar_scan_hoop
+  jne short   .loop_envvar_scan_hoop_1
   cmp         byte [rsi+16], "="
-  jne         .loop_envvar_scan_hoop
+  jne short   .loop_envvar_scan_hoop_1
 
   add         rsi, 17
   mov         [d.session_type], rsi
   dec         ebx
+  jmp short   .loop_envvar_scan_hoop_2
+
+.check_terminal:
+  cmp         dword [rsi], "TERM"
+  jne short   .check_alacritty
+  mov         rax, "_PROGRAM"
+  cmp         qword [rsi+4], rax
+  jne short   .loop_envvar_scan_hoop_2
+  cmp         byte [rsi+12], "="
+  jne short   .loop_envvar_scan_hoop_2
+
+  add         rsi, 13
+  jmp short   .end_check_terminal
+
+.check_alacritty:
+  cmp         dword [rsi], "ALAC"
+  jne short   .check_kitty
+  mov         rax, "RITTY_LO"
+  cmp         qword [rsi+4], rax
+  jne short   .loop_envvar_scan_hoop_2
+  mov         rsi, alacritty
+  jmp short   .end_check_terminal
+
+.check_kitty:
+  mov         rax, "KITTY_IN"
+  cmp         qword [rsi], rax
+  jne short   .check_shell
+  mov         rsi, kitty
+
+.end_check_terminal:
+  mov         [d.terminal], rsi
+  dec         ebx
 
 ; SIZE: this exists for the sake of short jumps
-.loop_envvar_scan_hoop:
-  jmp         .loop_envvar_scan
+.loop_envvar_scan_hoop_2:
+  jmp near   .loop_envvar_scan
 
 .check_shell:
   cmp         dword [rsi], "SHEL"
-  jne         .check_user
+  jne short   .check_user
   cmp         word [rsi+4], "L="
-  jne         .loop_envvar_scan_hoop
+  jne short   .loop_envvar_scan_hoop_2
 
-  ; SAFETY: in case if $SHELL doesn't contain a slash
-  mov         byte [rsi+5], "/"
+  mov         byte [rsi+5], "/" ; SAFETY: in case if $SHELL doesn't contain a slash
 
   lea         rdi, [rsi+6]
   not         ecx ; SIZE: this saves 3 bytes over `mov ecx, -1`, works since rcx will always be a small positive num (length of current env var)
@@ -103,28 +156,26 @@ main:
   repne scasb
 
   std
-
   ; SIZE: and we'll still have a very high number in ecx by now, so another -5 bytes 
   mov         al, "/"
   repne scasb
-
   cld
 
   add         rdi, 2
   mov         [d.shell], rdi
   dec         ebx
-  jmp         .loop_envvar_scan_hoop
+  jmp short   .loop_envvar_scan_hoop_2
 
 .check_user:
   cmp         dword [rsi], "USER"
-  jne         .loop_envvar_scan_hoop
+  jne short   .loop_envvar_scan_hoop_2
   cmp         byte [rsi+4], "="
-  jne         .loop_envvar_scan_hoop
+  jne short   .loop_envvar_scan_hoop_2
 
   add         rsi, 5
   mov         [d.username], rsi
   dec         ebx
-  jmp         .loop_envvar_scan_hoop
+  jmp short   .loop_envvar_scan_hoop_2
 
 .end_envvar_scan:
   mov         rsp, rbp
@@ -135,8 +186,8 @@ main:
   xor         esi, esi ; O_RDONLY
   ; mode doesn't matter
   syscall
-  cmp         eax, 0
-  jl          .ERR_failed_to_read_os_release
+  test        eax, eax
+  js          ERR_failed_to_read_os_release
 
   ; ssize_t read(int fd, void buf[count], size_t count);
   push        rax ; fd
@@ -145,8 +196,8 @@ main:
   lea         rsi, [d.main_buffer]
   mov         rdx, BUFFER_SIZE
   syscall
-  cmp         rax, 0
-  jl          .ERR_failed_to_read_os_release
+  test        rax, rax
+  js          ERR_failed_to_read_os_release
 
   pop         rdi
   push        rax ; byte count
@@ -163,30 +214,29 @@ main:
 
 @@:
   cmp         ecx, 12
-  jl          .ERR_couldnt_find_system_info
+  jl          ERR_couldnt_find_system_info
 
   cmp         dword [rsi], "PRET"
-  jne         .os_release_next
+  jne short   .os_release_next
   cmp         dword [rsi+4], "TY_N"
-  jne         .os_release_next
+  jne short   .os_release_next
   cmp         dword [rsi+8], "AME="
-  jne         .os_release_next
+  jne short   .os_release_next
 
-  mov         rbx, rsi
-  add         rbx, 13
+  lea         rbx, [rsi+13]
   lea         r10, [d.system]
   move_str_10 r10, rbx
   dec         ecx
   mov         [d.system_len], rcx
 
 
-  ;; we have to use /proc/meminfo for available ram since sysinfo doesn't have that
+  ; we have to use /proc/meminfo for available ram since sysinfo doesn't have that
   mov         eax, SYS_open
   mov         edi, meminfo_dir ; SAFETY: truncating is fine since it's guaranteed to be within bounds
   xor         esi, esi ; O_RDONLY
   syscall
   test        eax, eax
-  jl          .ERR_failed_to_read_meminfo
+  jl          ERR_failed_to_read_meminfo
 
   push        rax ; fd
   mov         rdi, rax
@@ -195,7 +245,7 @@ main:
   mov         edx, BUFFER_SIZE
   syscall
   test        eax, eax
-  jl          .ERR_failed_to_read_meminfo
+  jl          ERR_failed_to_read_meminfo
 
   pop         rdi
   push        rax ; byte count
@@ -212,14 +262,14 @@ main:
 
 @@:
   cmp         rcx, 13
-  jl          .ERR_couldnt_find_mem_available
+  jl          ERR_couldnt_find_mem_available
 
   cmp         dword [rsi], "MemA"
-  jne         .meminfo_next
+  jne short   .meminfo_next
   cmp         dword [rsi+4], "vail"
-  jne         .meminfo_next
+  jne short   .meminfo_next
   cmp         dword [rsi+8], "able"
-  jne         .meminfo_next
+  jne short   .meminfo_next
 
   add         rsi, 12
 
@@ -244,13 +294,12 @@ main:
   mov         [d.mem_available], rax
 
   mov         eax, 0x80000004
-  mov         esi, 48
+  mov         esi, 32
 
   ; NOTE: for safety's sake, in theory we should call cpuid with eax = 0x80000000 first
   ; to verify that the cpu supports extended functions up to 0x80000004, but any cpu
   ; made in the last 20 years should support that already
 .cpuid_loop:
-  sub         esi, 16
   push        rax
   cpuid
   lea         rdi, [d.cpu_name + rsi]
@@ -260,15 +309,17 @@ main:
   mov         dword [rdi+12], edx
   pop         rax
   dec         eax
-  test        esi, esi
-  jnz         .cpuid_loop
+  sub         esi, 16
+  jns short   .cpuid_loop
+
+  get_cpu_cores_and_threads
 
   ; int uname(struct utsname *buf);
   mov         eax, SYS_uname
   lea         rdi, [d.utsname]
   syscall
   test        eax, eax
-  jnz         .ERR_uname_failed
+  jnz         ERR_uname_failed
 @@:
 
   ; int sysinfo(struct sysinfo *info);
@@ -276,7 +327,7 @@ main:
   lea         rdi, [d.sysinfo]
   syscall
   test        eax, eax
-  jnz         .ERR_sysinfo_failed
+  jnz         ERR_sysinfo_failed
 @@:
 
   ; int statfs(const char *path, struct statfs *buf);
@@ -285,33 +336,26 @@ main:
   lea         rsi, [d.statvfs]
   syscall
   test        eax, eax
-  jnz         .ERR_statfs_failed
+  jnz         ERR_statfs_failed
 @@:
 
   ;; line 1, host name and username
   move_str_n  r15, logo_line_1, logo_line_1_size
   add         r15, logo_line_1_size
 
-  mov         word [r15], 0x5B1B ; "\e["
-  mov         dword [r15+2], "33m"
-  add         r15, 5
-
   mov         rdi, [d.username]
   call        move_str_0
   add         r15, rcx
 
-  mov         dword [r15], 0x31335B1B ; "\e[31"
-  mov         dword [r15+4], 0x5B1B406D ; "m@\e["
-  mov         dword [r15+8], "32m"
-  add         r15, 11
+  mov         byte [r15], "@"
+  inc         r15
 
   lea         rdi, [d.utsname.nodename]
   call        move_str_0
   add         r15, rcx
 
-  mov         dword [r15], 0x6D305B1B ; "\e[0m"
-  mov         dword [r15+4], 0x0A7E20 ; " ~\n"
-  add         r15, 7
+  mov         byte [r15], 10
+  inc         r15
 
   ;; line 2, system
   move_str_n  r15, logo_line_2, logo_line_2_size
@@ -360,87 +404,14 @@ main:
   mov         byte [r15], 10
   inc         r15
 
-  ;; line 5, uptime
+  ;; line 5, terminal
   move_str_n  r15, logo_line_5, logo_line_5_size
   add         r15, logo_line_5_size
 
-  mov         rax, [d.sysinfo.uptime]
-  xor         edx, edx
-  mov         ebx, 60*60*24
-  div         rbx
-  push        rdx
-  
-  test        eax, eax
-  jz          .skip_days
-  push        rax
+  mov         rdi, [d.terminal]
+  call        move_str_0
+  add         r15, rcx
 
-  call        dw_to_str
-  move_str_n  r15, r13, rbx
-  add         r15, rbx
-
-  pop         rax
-  mov         dword [r15], " day"
-  cmp         eax, 1
-  ja          @f
-  mov         word [r15+4], ", "
-  add         r15, 6
-  jmp         .skip_days
-@@:
-  mov         dword [r15+4], "s,  "
-  add         r15, 7
-
-.skip_days:
-  pop         rax
-  xor         edx, edx
-  mov         ebx, 60*60
-  div         rbx
-  push        rdx
-
-  test        eax, eax
-  jz          .skip_hours
-  push        rax
-
-  call        dw_to_str
-  move_str_n  r15, r13, rbx
-  add         r15, rbx
-
-  pop         rax
-  mov         dword [r15], " hou"
-  cmp         eax, 1
-  ja          @f
-  mov         dword [r15+4], "r,  "
-  add         r15, 7
-  jmp         .skip_hours
-@@:
-  mov         dword [r15+4], "rs, "
-  add         r15, 8
-
-.skip_hours:
-  pop         rax
-  xor         edx, edx
-  mov         ebx, 60
-  div         rbx
-
-  test        eax, eax
-  jz          .skip_minutes
-  push        rax
-
-  call        dw_to_str
-  move_str_n  r15, r13, rbx
-  add         r15, rbx
-
-  pop         rax
-  mov         dword [r15], " min"
-  cmp         eax, 1
-  ja          @f
-  mov         dword [r15+4], "ute "
-  add         r15, 7
-  jmp         .skip_minutes
-@@:
-  mov         dword [r15+4], "utes"
-  add         r15, 8
-
-.skip_minutes:
   mov         byte [r15], 10
   inc         r15
 
@@ -467,6 +438,164 @@ main:
   move_str_n  r15, logo_line_7, logo_line_7_size
   add         r15, logo_line_7_size
 
+  mov         rax, [d.sysinfo.uptime]
+  xor         edx, edx
+  mov         ebx, 60*60*24
+  div         rbx
+  push        rdx
+  
+  test        eax, eax
+  jz short    .skip_days
+  push        rax
+
+  call        dw_to_str
+
+  pop         rax
+  mov         dword [r15], " day"
+  mov         word [r15+4], ", "
+  add         r15, 6
+  cmp         eax, 1
+  je short    .skip_days
+  mov         dword [r15-2], "s, "
+  inc         r15
+
+.skip_days:
+  pop         rax
+  xor         edx, edx
+  mov         ebx, 60*60
+  div         rbx
+  push        rdx
+
+  test        eax, eax
+  jz short    .skip_hours
+  push        rax
+
+  call        dw_to_str
+
+  pop         rax
+  mov         dword [r15], " hou"
+  mov         dword [r15+4], "r, "
+  add         r15, 7
+  cmp         eax, 1
+  je short    .skip_hours
+  mov         dword [r15-2], "s, "
+  inc         r15
+
+.skip_hours:
+  pop         rax
+  xor         edx, edx
+  mov         ebx, 60
+  div         rbx
+
+  test        eax, eax
+  jz short    .skip_minutes
+  push        rax
+
+  call        dw_to_str
+
+  mov         rax, " minute"
+  mov         qword [r15], rax
+  add         r15, 7
+  cmp         eax, 1
+  je short    .skip_minutes
+  mov         byte [r15], "s"
+  inc         r15
+
+.skip_minutes:
+  mov         byte [r15], 10
+  inc         r15
+
+  ;; line 8, cpu
+  move_str_n  r15, logo_line_8, logo_line_8_size
+  add         r15, logo_line_8_size
+
+
+  lea         rdi, [d.cpu_name]
+  call        move_str_0
+  add         r15, rcx
+
+  mov         rax, 0x6D36335B1B2820  ; " (\e[36m"
+  mov         qword [r15], rax
+  add         r15, 7
+
+  mov         rax, [d.sysinfo.loads]
+  push        ax
+  shr         eax, 16
+  call        dw_to_str
+
+  mov         byte [r15], "."
+  inc         r15
+
+  pop         ax
+  xor         ebx, ebx ; NOTE: not sure if this is necessary
+  mov         bl, 100
+  mul         ebx
+  shr         eax, 16
+  call        dw_to_str
+
+  mov         rax, 0x0A296D305B1B25 ; "%\e[0m)\n"
+  mov         qword [r15], rax
+  add         r15, 7
+
+
+  ;; line 9, cpu line 2
+  move_str_n  r15, logo_line_9, logo_line_9_size
+  add         r15, logo_line_9_size
+
+  mov         eax, [d.cpu_cores]
+  test        eax, eax
+  jnz         @f
+  mov         r13, placeholder
+  move_str_n  r15, r13, placeholder_size
+  add         r15, placeholder_size
+
+  jmp short   .skip_cores
+
+@@:
+  call        dw_to_str
+
+.skip_cores:
+  mov         rax, " cores"
+  mov         qword [r15], rax
+  add         r15, 6
+
+  cmp         [d.cpu_p_cores], 0
+  je          @f
+
+  mov         word [r15], " ("
+  add         r15, 2
+
+  mov         eax, [d.cpu_p_cores]
+  call        dw_to_str
+
+  mov         word [r15], "p/"
+  add         r15, 2
+
+  mov         eax, [d.cpu_e_cores]
+  call        dw_to_str
+
+  mov         word [r15], "e)"
+  add         r15, 2
+
+@@:
+
+  mov         word [r15], ", "
+  add         r15, 2
+
+  mov         eax, [d.cpu_threads]
+  call        dw_to_str
+
+  mov         rax, " threads"
+  mov         qword [r15], rax
+  mov         byte [r15+8], 10
+  add         r15, 9
+
+  ;; no more numbered lines, memory
+  move_str_n  r15, logo_line_n, logo_line_n_size
+  add         r15, logo_line_n_size
+  move_str_n  r15, logo_line_memory, logo_line_memory_size
+  add         r15, logo_line_memory_size
+
   mov         rax, [d.sysinfo.totalram]
   mov         ebx, [d.sysinfo.mem_unit]
   mul         rbx
@@ -488,20 +617,15 @@ main:
   push        rdx
   
   call        dw_to_str
-  move_str_n  r15, r13, rbx
-  add         r15, rbx
 
   mov         byte [r15], "."
   inc         r15
 
   pop         rax
   call        dw_to_str
-  move_str_n  r15, r13, rbx
-  add         r15, rbx
 
-  mov         dword [r15], " GiB"
-  mov         dword [r15+4], " / "
-  add         r15, 7
+  mov         dword [r15], "G / "
+  add         r15, 4
 
   mov         rax, [d.sysinfo.totalram]
   mov         ebx, [d.sysinfo.mem_unit]
@@ -523,39 +647,32 @@ main:
   push        rdx
   
   call        dw_to_str
-  move_str_n  r15, r13, rbx
-  add         r15, rbx
 
   mov         byte [r15], "."
   inc         r15
 
   pop         rax
   call        dw_to_str
-  move_str_n  r15, r13, rbx
-  add         r15, rbx
 
-  mov         dword [r15], " GiB"
-  mov         dword [r15+4], 0x5B1B2820 ; " (\[e"
-  mov         dword [r15+8], "36m"
-  add         r15, 11
+  mov         rax, 0x6D36335B1B282047 ; "G (\e[36m"
+  mov         qword [r15], rax
+  add         r15, 8
 
   pop         rbx
   pop         rax
   xor         edx, edx
   div         rbx ; SAFETY: since we use KiB counts to compare, it can easily end up above 2^32, so we can't go with ebx
   call        dw_to_str
-  move_str_n  r15, r13, rbx
-  add         r15, rbx
 
-  mov         dword [r15], 0x305B1B25 ; "%\e[0"
-  mov         dword [r15+4], 0x0A296D ;"m)\n"
+  mov         rax, 0x0A296D305B1B25 ; "%\e[0m)\n" 
+  mov         qword [r15], rax
   add         r15, 7
 
-
-  ;; line 8, storage
-  move_str_n  r15, logo_line_8, logo_line_8_size
-  add         r15, logo_line_8_size
-
+  ;; storage
+  move_str_n  r15, logo_line_n, logo_line_n_size
+  add         r15, logo_line_n_size
+  move_str_n  r15, logo_line_storage, logo_line_storage_size
+  add         r15, logo_line_storage_size
 
   mov         rax, [d.statvfs.f_frsize]
   mov         rbx, [d.statvfs.f_blocks]
@@ -578,20 +695,15 @@ main:
   push        rdx
   
   call        dw_to_str
-  move_str_n  r15, r13, rbx
-  add         r15, rbx
 
   mov         byte [r15], "."
   inc         r15
 
   pop         rax
   call        dw_to_str
-  move_str_n  r15, r13, rbx
-  add         r15, rbx
 
-  mov         dword [r15], " GiB"
-  mov         dword [r15+4], " /  "
-  add         r15, 7
+  mov         dword [r15], "G / "
+  add         r15, 4
 
   mov         rax, [d.statvfs.f_frsize]
   mov         rbx, [d.statvfs.f_blocks]
@@ -613,111 +725,67 @@ main:
   push        rdx
 
   call        dw_to_str
-  move_str_n  r15, r13, rbx
-  add         r15, rbx
 
   mov         byte [r15], "."
   inc         r15
 
   pop         rax
   call        dw_to_str
-  move_str_n  r15, r13, rbx
-  add         r15, rbx
 
-  mov         dword [r15], " GiB"
-  mov         dword [r15+4], 0x5B1B2820 ; " (\[e"
-  mov         dword [r15+8], "36m"
-  add         r15, 11
+  mov         rax, 0x6D36335B1B282047 ; "G (\e[36m"
+  mov         qword [r15], rax
+  add         r15, 8
 
   pop         rbx
   pop         rax
   xor         edx, edx
   div         rbx ; SAFETY: since we use KiB counts to compare, it can easily end up above 2^32, so we can't go with ebx
   call        dw_to_str
-  move_str_n  r15, r13, rbx
-  add         r15, rbx
 
-  mov         dword [r15], 0x305B1B25 ; "%\e[0"
-  mov         dword [r15+4], 0x0A296D ;"m)\n"
+  mov         rax, 0x0A296D305B1B25 ; "%\e[0m)\n" 
+  mov         qword [r15], rax
   add         r15, 7
 
-  ;; line 9, cpu and load
-  move_str_n  r15, logo_line_9, logo_line_9_size
-  add         r15, logo_line_9_size
-
-  lea         rdi, [d.cpu_name]
-  call        move_str_0
-  add         r15, rcx
-
-  mov         dword [r15], 0x5B1B2820 ; " (\e["
-  mov         dword [r15+4], "36m"
-  add         r15, 7
-
-  mov         rax, [d.sysinfo.loads]
-  push        ax
-  shr         rax, 16
-  call        dw_to_str
-  move_str_n  r15, r13, rbx
-  add         r15, rbx
-
-  mov         byte [r15], "."
-  inc         r15
-
-  pop         rax
-  and         eax, 0xFFFF
-  mov         ebx, 100
-  mul         ebx
-  shr         eax, 16
-  call        dw_to_str
-  move_str_n  r15, r13, rbx
-  add         r15, rbx
-
-  mov         dword [r15], 0x305B1B25 ; "%\e[0"
-  mov         dword [r15+4], 0x0A296D ;"m)\n"
-  add         r15, 7
-
-  ;; line 10, colors
-  move_str_n  r15, logo_line_10, logo_line_10_size
-  add         r15, logo_line_10_size
 
   ;; aaaand redeem
   lea         rbx, [d.main_buffer]
   sub         r15, rbx
-  mov         eax, 1 ; SYS_write ; TODO: uses parts of elf header for 1??
-  mov         edi, 1 ; stdout
   lea         rsi, [d.main_buffer]
   mov         rdx, r15
+print_and_end:
+  mov         eax, 1 ; SYS_write ; TODO: uses parts of elf header for 1??
+  mov         edi, eax ; stdout
   syscall
 
   xor         dil,dil ; NOTE: sys_exit internally masks this with 0xFF
-.end:
+exit_and_end:
   mov         eax, SYS_exit
   syscall
 
 ;;;;;;;;;; errors ;;;;;;;;;;
 
 ; TODO: we should never be erroring
-.ERR_failed_to_read_os_release:
+ERR_failed_to_read_os_release:
   mov         dil,  101
-  jmp         .end
-.ERR_couldnt_find_system_info:
+  jmp short   exit_and_end
+ERR_couldnt_find_system_info:
   mov         dil,  102
-  jmp         .end
-.ERR_failed_to_read_meminfo:
+  jmp short   exit_and_end
+ERR_failed_to_read_meminfo:
   mov         dil,  103
-  jmp         .end
-.ERR_couldnt_find_mem_available:
+  jmp short   exit_and_end
+ERR_couldnt_find_mem_available:
   mov         dil,  104
-  jmp         .end
-.ERR_uname_failed:
+  jmp short   exit_and_end
+ERR_uname_failed:
   mov         dil,  107
-  jmp         .end
-.ERR_sysinfo_failed:
+  jmp short   exit_and_end
+ERR_sysinfo_failed:
   mov         dil,  108
-  jmp         .end
-.ERR_statfs_failed:
+  jmp short   exit_and_end
+ERR_statfs_failed:
   mov         dil,  109
-  jmp         .end
+  jmp short   exit_and_end
 
 ;;;;;;;;;; data ;;;;;;;;;;
 
@@ -763,14 +831,19 @@ struc DataStruct {
   .username      rq 1
   .shell         rq 1
   .session_type  rq 1
+  .terminal      rq 1
   .desktop       rq 1
   .system        rb 64
   .system_len    rq 1
   .cpu_name      rb 64
   .mem_available rq 1
+  .cpu_threads   rd 1
+  .cpu_cores     rd 1
+  .cpu_p_cores   rd 1
+  .cpu_e_cores   rd 1
 
   .main_buffer  rb 2048
-  .extra_buffer rb 32
+  .extra_buffer rb 128
 }
 
 virtual at r14
@@ -787,32 +860,43 @@ os_release_dir db "/etc/os-release", 0
 meminfo_dir    db "/proc/meminfo", 0
 root_path      db "/", 0
 
-placeholder db "<N/A>"
+alacritty      db "Alacritty", 0
+kitty          db "Kitty", 0
+
+placeholder db "<N/A>", 0
 placeholder_size = $ - placeholder
 
-logo_line_1 db 10, 27, "[36m⠀⠀⠀⠀⠠⣿⣧⠀⠀", 27, "[34m⢻⣿⡄⠀⣼⣿⠆⠀⠀ ⠀⠀"
+logo_line_1 db 10, 27, "[36m    ⠠⣿⣧  ", 27, "[34m⢻⣿⡄ ⣼⣿⠆     ", 27,"[34m", 27,"[46m ", 27, "[36;42m ", 27, "[32;43m ", 27, "[33;41m ", 27, "[35m", 27, "[0;35m ", 27, "[0;1m"
 logo_line_1_size = $ - logo_line_1
-logo_line_2 db 27, "[36m⠀⠀⠀⣀⣀⣹⣿⣧⣀⣀", 27, "[34m⢻⣿⣾⣿⠏⠀⠀", 27, "[36m⣀⠀ ⠀", 27, "[36m  ", 27, "[34msystem", 27, "[0m  "
+logo_line_2 db 27, "[0;36m   ⣀⣀⣹⣿⣧⣀⣀", 27, "[34m⢻⣿⣾⣿⠏  ", 27, "[36m⣀   ", 27, "[36m  ", 27, "[34msystem", 27, "[0m   "
 logo_line_2_size = $ - logo_line_2
-logo_line_3 db 27, "[36m⠀⠀⠼⠿⠿⠿⠿⠿⠿⠿⠆", 27, "[34m⠻⣿⣯⠀⠀", 27, "[36m⣼⣿⠃ ⠀", 27, "[36m  ", 27, "[34mkernel", 27, "[0m  "
+logo_line_3 db 27, "[36m  ⠼⠿⠿⠿⠿⠿⠿⠿⠆", 27, "[34m⠻⣿⣯  ", 27, "[36m⣼⣿⠃  ", 27, "[36m  ", 27, "[34mkernel", 27, "[0m   "
 logo_line_3_size = $ - logo_line_3
-logo_line_4 db 27, "[34m⠀⠀⠀⠀⢠⣿⡟⠀⠀⠀⠀⠀", 27, "[34m⠹⣿⠃", 27, "[36m⣼⣿⠃⠀ ⠀", 27, "[36m  ", 27, "[34mshell", 27, "[0m   "
+logo_line_4 db 27, "[34m    ⢠⣿⡟     ", 27, "[34m⠹⣿⠃", 27, "[36m⣼⣿⠃   ", 27, "[36m󱆃  ", 27, "[34mshell", 27, "[0m    "
 logo_line_4_size = $ - logo_line_4
-logo_line_5 db 27, "[34m⢾⣿⣿⣿⣿⡟⠀⠀⠀⠀⠀⠀⠀⠀", 27, "[36m⣼⣿⣿⣿⣿⡷ ", 27, "[36m  ", 27, "[34muptime", 27, "[0m  "
+logo_line_5 db 27, "[34m⢾⣿⣿⣿⣿⡟        ", 27, "[36m⣼⣿⣿⣿⣿⡷ ", 27, "[36m  ", 27, "[34mterm   ", 27, "[0m  "
 logo_line_5_size = $ - logo_line_5
-logo_line_6 db 27, "[34m⠀⠀⢠⣿⡟", 27, "[36m⢠⣿⣆⠀⠀⠀⠀⠀", 27, "[36m⣼⣿⠃⠀⠀⠀⠀ ", 27, "[36m  ", 27, "[34mdesktop", 27, "[0m "
+logo_line_6 db 27, "[34m  ⢠⣿⡟", 27, "[36m⢠⣿⣆     ", 27, "[36m⣼⣿⠃     ", 27, "[36m  ", 27, "[34mdesktop", 27, "[0m  "
 logo_line_6_size = $ - logo_line_6
-logo_line_7 db 27, "[34m⠀⠀⠻⠟⠀⠀", 27, "[36m⣻⣿⣦", 27, "[34m⠰⣶⣶⣶⣶⣶⣶⣶⡖⠀ ⠀", 27, "[36m  ", 27, "[34mmemory", 27, "[0m  "
+logo_line_7 db 27, "[34m  ⠻⠟  ", 27, "[36m⣻⣿⣦", 27, "[34m⠰⣶⣶⣶⣶⣶⣶⣶⡖   ", 27, "[36m  ", 27, "[34muptime", 27, "[0m   "
 logo_line_7_size = $ - logo_line_7
-logo_line_8 db 27, "[36m⠀⠀⠀⠀⠀⣰⣿⡿⣿⣧", 27, "[34m⠈⠉⠙⣿⣿⡉⠉⠀⠀⠀ ", 27, "[36m󱥎  [34mstorage", 27, "[0m "
+logo_line_8 db 27, "[36m     ⣰⣿⡿⣿⣧", 27, "[34m⠈⠉⠙⣿⣿⡉⠉    ", 27, "[36m  ", 27, "[34mcpu    ", 27, "[0m  "
 logo_line_8_size = $ - logo_line_8
-logo_line_9 db 27, "[36m⠀⠀⠀⠀⠰⣿⡟⠀⠘⣿⣧⠀⠀", 27, "[34m⠘⣿⡗⠀⠀⠀ ⠀", 27, "[36m  [34mcpu    ", 27, "[0m "
+logo_line_9 db 27, "[36m    ⠰⣿⡟ ⠘⣿⣧  ", 27, "[34m⠘⣿⡗     ", 27, "[36m󱇫  ", 27, "[34mcores  ", 27, "[0m  "
 logo_line_9_size = $ - logo_line_9
-logo_line_10 db "                     ", 27, "[36m  ", 27, "[34mpalette", 27, "[0m ", 27, "[34m  ", 27, "[36m  ", 27, "[32m  ", 27, "[33m  ", 27, "[31m  ", 27, "[35m  ", 27, "[0m", 10
+
+logo_line_storage db 27, "[36m󱥎  ", 27, "[34mstorage", 27, "[0m  "
+logo_line_storage_size = $ - logo_line_storage
+
+logo_line_memory db 27, "[36m  ", 27, "[34mmemory", 27, "[0m   "
+logo_line_memory_size = $ - logo_line_memory
+
+logo_line_n db "                     "
+logo_line_n_size = $ - logo_line_n
 
 
-; SAFETe: linux pads end of the program with 0 bytes in memory, so
+; SAFETY: linux pads end of the program with 0 bytes in memory, so
 ; it's safe to read this as a qword
 _10 db 10
 
-logo_line_10_size = $ - logo_line_10
+

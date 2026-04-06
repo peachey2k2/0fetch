@@ -18,7 +18,7 @@ yea yea whatever, here are some bullet points:
 - nice cozy display
 - fast as fuck
 - very cool braille logo (it's kinda tuff)
-- did i mention fast
+- did i mention fast?
 
 ## Okay but why?
 Aside from it being conceptually cool, I mainly made this just to fuck with [@NotAShelf](https://github.com/NotAShelf) and [@amaanq](https://github.com/amaanq).
@@ -39,11 +39,11 @@ Also I like code golfing.
 
 Want more stupid fancy tables? Go stare at [microfetch's benchmarks](https://github.com/NotAShelf/microfetch?tab=readme-ov-file#benchmarks).
 
-## But portability?????????????
+## But portability????????????
 <img width="80%" alt="image" src="https://github.com/user-attachments/assets/e3377a5b-72de-4193-bf93-3b2ca0907b99" />
 
 
-## How do I customize
+## How do I customize???????????????
 You don't. Just go use [fastfetch](https://github.com/fastfetch-cli/fastfetch) like a normal person if you want that.
 
-Or alternatively, write your own. Trust me it's not that hard.
+Or alternatively, write your own fetcher. Trust me it's not that hard.
