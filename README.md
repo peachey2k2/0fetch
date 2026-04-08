@@ -28,9 +28,29 @@ Basically raf ([@NotAShelf](https://github.com/NotAShelf)) made his own fetcher 
 Also I like code golfing.
 
 ## How do I install it???
+```nix
+# add these to your flake inputs:
+_0fetch.url = "github:peachey2k2/0fetch";
+_0fetch.inputs.nixpkgs.follows = "nixpkgs-unstable";
+
+# and this to your overlays
+_0fetch = inputs._0fetch.packages.${system}.default;
+
+# and this to your packages
+0fetch
+
+# (you'll also want nerdfonts)
+```
+and if you're not using flakes, literally why???
+
+> [!TIP]
+> you can use `nix run github:peachey2k2/0fetch` to run it once without installing
+
+alternatively if you wanna try it in an inferior distro for some reason:
 1. clone the repo
 2. run `make build` (you'll need [fasm](https://flatassembler.net/))
 3. add it to your $PATH if you wanna
+(no logo cuz fuck you, just patch it smh)
 
 ## But the benchmarks?????
 <img width="80%" alt="image" src="https://github.com/user-attachments/assets/aa1665af-3ebd-49ea-af4e-e2f187a727a9" />
