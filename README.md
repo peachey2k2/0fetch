@@ -3,7 +3,7 @@
 <div id="doc-begin" align="center">
   <h1 id="header">0fetch</h1>
   <p>tiny fetch tool written in x86 assembly</p>
-    <img width="80%" alt="image" src="https://github.com/user-attachments/assets/9dbb8f51-fc92-4ca3-8179-bf322dab8184" />
+    <img width="80%" alt="image" src="https://github.com/user-attachments/assets/cfe27cc8-1ef1-44eb-a9e6-7b299f9575ce" />
   <br/>
   <br/>
 </div>
