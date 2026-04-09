@@ -151,7 +151,9 @@ main:
   mov         byte [rsi+5], "/" ; SAFETY: in case if $SHELL doesn't contain a slash
 
   lea         rdi, [rsi+6]
-  not         ecx ; SIZE: this saves 3 bytes over `mov ecx, -1`, works since rcx will always be a small positive num (length of current env var)
+  ; SAFETY: use a full count for the forward/reverse scasb pair so the reverse
+  ; scan can always reach the last slash in $SHELL.
+  mov         ecx, -1
   xor         al, al ; 0
   repne scasb
 
@@ -898,5 +900,3 @@ logo_line_n_size = $ - logo_line_n
 ; SAFETY: linux pads end of the program with 0 bytes in memory, so
 ; it's safe to read this as a qword
 _10 db 10
-
-
